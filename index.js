@@ -3,7 +3,7 @@
 const has = require('has');
 const inspect = require('object-inspect');
 const hasPrivateFields = require('has-private-fields')();
-const inspector = hasPrivateFields && require('inspector'); // eslint-disable-line global-require
+const CDP = hasPrivateFields && require('chrome-remote-interface'); // eslint-disable-line global-require
 
 const getThis = function () {
 	delete global.$getThis;
@@ -15,22 +15,15 @@ module.exports = async function getPrivateFields(object) {
 		return [];
 	}
 
-	const session = new inspector.Session();
-	session.connect();
+	process.kill(process.pid, 'SIGUSR1');
+	const client = await new CDP({ port: 9229 });
+	await client.Runtime.enable();
 
-	const post = (command, arg) => new Promise((resolve, reject) => {
-		session.post(command, arg, (err, response) => {
-			if (err) {
-				reject(err);
-			} else {
-				resolve(response);
-			}
-		});
-	});
+	const post = (command, arg) => client.Runtime[command](arg);
 
 	const getReceiver = (objectId) => {
 		global.$getThis = getThis;
-		return post('Runtime.callFunctionOn', {
+		return post('callFunctionOn', {
 			functionDeclaration: '$getThis',
 			objectId,
 			returnByValue: true,
@@ -42,12 +35,12 @@ module.exports = async function getPrivateFields(object) {
 		return object;
 	};
 	const { result: { objectId } } = await post(
-		'Runtime.evaluate',
+		'evaluate',
 		{ expression: '$object()' },
 	);
 
 	const { privateProperties } = await post(
-		'Runtime.getProperties',
+		'getProperties',
 		{ objectId },
 	);
 
@@ -125,6 +118,6 @@ module.exports = async function getPrivateFields(object) {
 			},
 		};
 	}));
-	session.disconnect();
+	await client.close();
 	return properties;
 };
